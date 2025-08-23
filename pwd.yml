@@ -5,6 +5,7 @@ services:
     image: frappe/erpnext:v15.76.0
     networks:
       - frappe_network
+      - coolify-traefik
     deploy:
       restart_policy:
         condition: on-failure
@@ -14,8 +15,8 @@ services:
     environment:
       DB_HOST: db
       DB_PORT: "3306"
-      MYSQL_ROOT_PASSWORD: admin
-      MARIADB_ROOT_PASSWORD: admin
+      MYSQL_ROOT_PASSWORD: "@Admin123@"
+      MARIADB_ROOT_PASSWORD: "@Admin123@"
 
   configurator:
     image: frappe/erpnext:v15.76.0
@@ -34,13 +35,14 @@ services:
         bench set-config -gp db_port $$DB_PORT;
         bench set-config -g redis_cache "redis://$$REDIS_CACHE";
         bench set-config -g redis_queue "redis://$$REDIS_QUEUE";
-        bench set-config -g redis_socketio "redis://$$REDIS_QUEUE";
+        bench set-config -g redis_socketio "redis://$$REDIS_SOCKETIO";
         bench set-config -gp socketio_port $$SOCKETIO_PORT;
     environment:
       DB_HOST: db
       DB_PORT: "3306"
       REDIS_CACHE: redis-cache:6379
       REDIS_QUEUE: redis-queue:6379
+      REDIS_SOCKETIO: redis-socketio:6379
       SOCKETIO_PORT: "9000"
     volumes:
       - sites:/home/frappe/frappe-bench/sites
@@ -77,14 +79,14 @@ services:
           fi
         done;
         echo "sites/common_site_config.json found";
-        bench new-site --mariadb-user-host-login-scope='%' --admin-password=admin --db-root-username=root --db-root-password=admin --install-app erpnext --set-default frontend;
+        bench new-site --mariadb-user-host-login-scope='%' --admin-password=@Admin123@ --db-root-username=root --db-root-password=@Admin123@ --install-app erpnext --set-default crm.crogallcapital.com;
 
   db:
     image: mariadb:10.6
     networks:
       - frappe_network
     healthcheck:
-      test: mysqladmin ping -h localhost --password=admin
+      test: mysqladmin ping -h localhost --password=@Admin123@
       interval: 1s
       retries: 20
     deploy:
@@ -94,10 +96,10 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
       - --skip-character-set-client-handshake
-      - --skip-innodb-read-only-compressed # Temporary fix for MariaDB 10.6
+      - --skip-innodb-read-only-compressed
     environment:
-      MYSQL_ROOT_PASSWORD: admin
-      MARIADB_ROOT_PASSWORD: admin
+      MYSQL_ROOT_PASSWORD: "@Admin123@"
+      MARIADB_ROOT_PASSWORD: "@Admin123@"
     volumes:
       - db-data:/var/lib/mysql
 
@@ -105,6 +107,7 @@ services:
     image: frappe/erpnext:v15.76.0
     networks:
       - frappe_network
+      - coolify-traefik
     depends_on:
       - websocket
     deploy:
@@ -114,7 +117,7 @@ services:
       - nginx-entrypoint.sh
     environment:
       BACKEND: backend:8000
-      FRAPPE_SITE_NAME_HEADER: frontend
+      FRAPPE_SITE_NAME_HEADER: crm.crogallcapital.com
       SOCKETIO: websocket:9000
       UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
       UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
@@ -124,6 +127,12 @@ services:
     volumes:
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.erpnext.rule=Host(`crm.crogallcapital.com`)"
+      - "traefik.http.routers.erpnext.entrypoints=websecure"
+      - "traefik.http.routers.erpnext.tls.certresolver=letsencrypt"
+      - "traefik.http.services.erpnext.loadbalancer.server.port=8080"
 
   queue-long:
     image: frappe/erpnext:v15.76.0
@@ -137,6 +146,8 @@ services:
       - worker
       - --queue
       - long,default,short
+    environment:
+      REDIS_QUEUE_URL: redis://redis-queue:6379
     volumes:
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
@@ -153,6 +164,8 @@ services:
       - worker
       - --queue
       - short,default
+    environment:
+      REDIS_QUEUE_URL: redis://redis-queue:6379
     volumes:
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
@@ -174,6 +187,8 @@ services:
     deploy:
       restart_policy:
         condition: on-failure
+    volumes:
+      - redis-cache-data:/data
 
   scheduler:
     image: frappe/erpnext:v15.76.0
@@ -185,6 +200,8 @@ services:
     command:
       - bench
       - schedule
+    environment:
+      REDIS_QUEUE_URL: redis://redis-queue:6379
     volumes:
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
@@ -199,6 +216,8 @@ services:
     command:
       - node
       - /home/frappe/frappe-bench/apps/frappe/socketio.js
+    environment:
+      REDIS_QUEUE_URL: redis://redis-queue:6379
     volumes:
       - sites:/home/frappe/frappe-bench/sites
       - logs:/home/frappe/frappe-bench/logs
@@ -206,9 +225,12 @@ services:
 volumes:
   db-data:
   redis-queue-data:
+  redis-cache-data:
   sites:
   logs:
 
 networks:
   frappe_network:
     driver: bridge
+  coolify-traefik:
+    external: true
