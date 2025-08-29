@@ -1,5 +1,3 @@
-version: "3"
-
 services:
   configurator:
     image: 'frappe/erpnext:v15.47.0'
