@@ -44,8 +44,6 @@ services:
       - 'REDIS_SOCKETIO=redis-socketio:6379'
     volumes:
       - 'sites:/home/frappe/frappe-bench/sites'
-    depends_on:
-      - configurator
     networks:
       - coolify
   frontend:
@@ -98,8 +96,6 @@ services:
       - default
     volumes:
       - 'sites:/home/frappe/frappe-bench/sites'
-    depends_on:
-      - configurator
     networks:
       - coolify
   queue-long:
@@ -114,8 +110,6 @@ services:
       - long
     volumes:
       - 'sites:/home/frappe/frappe-bench/sites'
-    depends_on:
-      - configurator
     networks:
       - coolify
   queue-short:
@@ -130,8 +124,6 @@ services:
       - short
     volumes:
       - 'sites:/home/frappe/frappe-bench/sites'
-    depends_on:
-      - configurator
     networks:
       - coolify
   scheduler:
@@ -144,8 +136,6 @@ services:
       - schedule
     volumes:
       - 'sites:/home/frappe/frappe-bench/sites'
-    depends_on:
-      - configurator
     networks:
       - coolify
   socketio:
@@ -186,8 +176,6 @@ services:
       - LETSENCRYPT_EMAIL=admin@crogallcapital.com
     volumes:
       - 'sites:/home/frappe/frappe-bench/sites'
-    depends_on:
-      - configurator
     networks:
       - coolify
   db:
