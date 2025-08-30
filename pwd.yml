@@ -1,249 +1,247 @@
+version: '3.8'
 services:
   configurator:
-    image: 'frappe/erpnext:v15.47.0'
+    image: 'frappe/erpnext:v15.34.0'
     deploy:
       restart_policy:
-        condition: none
-    entrypoint:
-      - bash
-      - '-c'
-    command:
-      - |
-        ls -la /home/frappe/frappe-bench/sites/frontend/dist || echo "Frontend not found"; bench set-config -g db_host $$DB_HOST; bench set-config -g redis_cache "redis://$$REDIS_CACHE"; bench set-config -g redis_queue "redis://$$REDIS_QUEUE"; bench set-config -g redis_socketio "redis://$$REDIS_SOCKETIO"; bench set-config -g socketio_port $$SOCKETIO_PORT;
+        condition: 'no'
+    command: |
+      bash -c '
+      echo "Esperando servicios…"; sleep 10;
+      cd /home/frappe/frappe-bench;
+      ls -1 apps > sites/apps.txt;
+      bench set-config -g db_host $$DB_HOST;
+      bench set-config -g redis_cache "redis://$$REDIS_CACHE";
+      bench set-config -g redis_queue "redis://$$REDIS_QUEUE";
+      bench set-config -g redis_socketio "redis://$$REDIS_SOCKETIO";
+      echo "Configurator completado";
+      '
     environment:
-      DB_HOST: db
-      DB_PORT: 3306
-      REDIS_CACHE: 'redis-cache:6379'
-      REDIS_QUEUE: 'redis-queue:6379'
-      REDIS_SOCKETIO: 'redis-socketio:6379'
-      SOCKETIO_PORT: 9000
+      - DB_HOST=db
+      - DB_PORT=3306
+      - 'REDIS_CACHE=redis-cache:6379'
+      - 'REDIS_QUEUE=redis-queue:6379'
+      - 'REDIS_SOCKETIO=redis-socketio:6379'
     volumes:
-      - 'sites-vol:/home/frappe/frappe-bench/sites'
-      - 'logs-vol:/home/frappe/frappe-bench/logs'
+      - 'sites:/home/frappe/frappe-bench/sites'
     depends_on:
       - db
       - redis-cache
       - redis-queue
       - redis-socketio
+    networks:
+      - coolify
   backend:
-    image: 'frappe/erpnext:v15.47.0'
+    image: 'frappe/erpnext:v15.34.0'
     deploy:
-      replicas: 1
+      restart_policy:
+        condition: on-failure
+    environment:
+      - DB_HOST=db
+      - DB_PORT=3306
+      - 'REDIS_CACHE=redis-cache:6379'
+      - 'REDIS_QUEUE=redis-queue:6379'
+      - 'REDIS_SOCKETIO=redis-socketio:6379'
     volumes:
-      - 'sites-vol:/home/frappe/frappe-bench/sites'
-      - 'logs-vol:/home/frappe/frappe-bench/logs'
+      - 'sites:/home/frappe/frappe-bench/sites'
     depends_on:
-      - create-site
+      - configurator
+    networks:
+      - coolify
   frontend:
-    image: 'frappe/erpnext:v15.47.0'
+    image: 'frappe/erpnext:v15.34.0'
     deploy:
-      replicas: 1
+      restart_policy:
+        condition: on-failure
     command:
       - nginx-entrypoint.sh
     environment:
-      BACKEND: 'backend:8000'
-      FRAPPE_SITE_NAME_HEADER: crm.crogallcapital.com
-      SOCKETIO: 'websocket:9000'
-      UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
-      UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
-      UPSTREAM_REAL_IP_RECURSIVE: 'off'
+      - 'BACKEND=backend:8000'
+      - 'SOCKETIO=socketio:9000'
+      - FRAPPE_SITE_NAME_HEADER=crm.crogallcapital.com
+      - UPSTREAM_REAL_IP_ADDRESS=127.0.0.1
+      - UPSTREAM_REAL_IP_HEADER=X-Forwarded-For
+      - UPSTREAM_REAL_IP_RECURSIVE=off
+      - PROXY_READ_TIMEOUT=120
+      - CLIENT_MAX_BODY_SIZE=50m
+      - SKIP_NGINX_TEMPLATE_GENERATION=0
+      - HTTP_TIMEOUT=120
+      - FRAPPE_SITE_NAME_HEADER_ENABLED=1
     volumes:
-      - 'sites-vol:/home/frappe/frappe-bench/sites'
-      - 'logs-vol:/home/frappe/frappe-bench/logs'
-    ports:
-      - '8081:8080'
-    healthcheck:
-      test:
-        - CMD
-        - curl
-        - '-f'
-        - 'http://localhost:8080/api/method/ping'
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 120s
+      - 'sites:/home/frappe/frappe-bench/sites'
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.erpnext-https.rule=Host(`crm.crogallcapital.com`)
+      - traefik.http.routers.erpnext-https.entrypoints=https
+      - traefik.http.routers.erpnext-https.tls=true
+      - traefik.http.routers.erpnext-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.erpnext-https.service=erpnext-service
+      - traefik.http.routers.erpnext-http.rule=Host(`crm.crogallcapital.com`)
+      - traefik.http.routers.erpnext-http.entrypoints=http
+      - traefik.http.routers.erpnext-http.middlewares=redirect-to-https
+      - traefik.http.services.erpnext-service.loadbalancer.server.port=8080
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
     depends_on:
       - backend
-      - websocket
-  websocket:
-    image: 'frappe/erpnext:v15.47.0'
-    deploy:
-      replicas: 1
-    command:
-      - node
-      - /home/frappe/frappe-bench/apps/frappe/socketio.js
-    volumes:
-      - 'sites-vol:/home/frappe/frappe-bench/sites'
-      - 'logs-vol:/home/frappe/frappe-bench/logs'
-    depends_on:
-      - backend
+      - socketio
+    networks:
+      - coolify
   queue-default:
-    image: 'frappe/erpnext:v15.47.0'
+    image: 'frappe/erpnext:v15.34.0'
     deploy:
-      replicas: 1
+      restart_policy:
+        condition: on-failure
     command:
       - bench
       - worker
       - '--queue'
       - default
     volumes:
-      - 'sites-vol:/home/frappe/frappe-bench/sites'
-      - 'logs-vol:/home/frappe/frappe-bench/logs'
+      - 'sites:/home/frappe/frappe-bench/sites'
     depends_on:
-      - backend
+      - configurator
+    networks:
+      - coolify
   queue-long:
-    image: 'frappe/erpnext:v15.47.0'
+    image: 'frappe/erpnext:v15.34.0'
     deploy:
-      replicas: 1
+      restart_policy:
+        condition: on-failure
     command:
       - bench
       - worker
       - '--queue'
       - long
     volumes:
-      - 'sites-vol:/home/frappe/frappe-bench/sites'
-      - 'logs-vol:/home/frappe/frappe-bench/logs'
+      - 'sites:/home/frappe/frappe-bench/sites'
     depends_on:
-      - backend
+      - configurator
+    networks:
+      - coolify
   queue-short:
-    image: 'frappe/erpnext:v15.47.0'
+    image: 'frappe/erpnext:v15.34.0'
     deploy:
-      replicas: 1
+      restart_policy:
+        condition: on-failure
     command:
       - bench
       - worker
       - '--queue'
       - short
     volumes:
-      - 'sites-vol:/home/frappe/frappe-bench/sites'
-      - 'logs-vol:/home/frappe/frappe-bench/logs'
+      - 'sites:/home/frappe/frappe-bench/sites'
     depends_on:
-      - backend
+      - configurator
+    networks:
+      - coolify
   scheduler:
-    image: 'frappe/erpnext:v15.47.0'
+    image: 'frappe/erpnext:v15.34.0'
     deploy:
-      replicas: 1
+      restart_policy:
+        condition: on-failure
     command:
       - bench
       - schedule
     volumes:
-      - 'sites-vol:/home/frappe/frappe-bench/sites'
-      - 'logs-vol:/home/frappe/frappe-bench/logs'
+      - 'sites:/home/frappe/frappe-bench/sites'
     depends_on:
-      - backend
+      - configurator
+    networks:
+      - coolify
+  socketio:
+    image: 'frappe/erpnext:v15.34.0'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command:
+      - node
+      - /home/frappe/frappe-bench/apps/frappe/socketio.js
+    volumes:
+      - 'sites:/home/frappe/frappe-bench/sites'
+    depends_on:
+      - redis-socketio
+    networks:
+      - coolify
+  create-site:
+    image: 'frappe/erpnext:v15.34.0'
+    deploy:
+      restart_policy:
+        condition: 'no'
+    command: |
+      bash -c '
+      echo "Esperando base de datos…";
+      wait-for-it db:3306 --timeout=180 --strict -- echo "Base de datos lista";
+      sleep 15;
+      bench new-site crm.crogallcapital.com \
+           --no-mariadb-socket \
+           --admin-password=changeme123 \
+           --db-root-password=admin123 \
+           --install-app erpnext \
+           --set-default;
+      bench --site crm.crogallcapital.com set-config setup_complete 1;
+      echo "Sitio creado exitosamente";
+      '
+    environment:
+      - SITE_NAME=crm.crogallcapital.com
+      - LETSENCRYPT_EMAIL=admin@crogallcapital.com
+    volumes:
+      - 'sites:/home/frappe/frappe-bench/sites'
+    depends_on:
+      - configurator
+    networks:
+      - coolify
   db:
     image: 'mariadb:10.6'
-    healthcheck:
-      test:
-        - CMD
-        - mysqladmin
-        - ping
-        - '-h'
-        - localhost
-        - '--password=admin'
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 60s
     deploy:
-      replicas: 1
+      restart_policy:
+        condition: on-failure
     command:
       - '--character-set-server=utf8mb4'
       - '--collation-server=utf8mb4_unicode_ci'
       - '--skip-character-set-client-handshake'
       - '--skip-innodb-read-only-compressed'
       - '--innodb-buffer-pool-size=256M'
-      - '--wait-timeout=28800'
-      - '--interactive-timeout=28800'
-      - '--max-connections=200'
     environment:
-      MYSQL_ROOT_PASSWORD: admin
-      MYSQL_CHARACTER_SET_SERVER: utf8mb4
-      MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+      - MYSQL_ROOT_PASSWORD=admin123
+      - MYSQL_CHARACTER_SET_SERVER=utf8mb4
+      - MYSQL_COLLATION_SERVER=utf8mb4_unicode_ci
     volumes:
-      - 'db-vol:/var/lib/mysql'
+      - 'db-data:/var/lib/mysql'
+    networks:
+      - coolify
   redis-cache:
     image: 'redis:6.2-alpine'
     deploy:
-      replicas: 1
+      restart_policy:
+        condition: on-failure
     volumes:
-      - 'redis-cache-vol:/data'
-    healthcheck:
-      test:
-        - CMD
-        - redis-cli
-        - ping
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      - 'redis-cache-data:/data'
+    networks:
+      - coolify
   redis-queue:
     image: 'redis:6.2-alpine'
     deploy:
-      replicas: 1
+      restart_policy:
+        condition: on-failure
     volumes:
-      - 'redis-queue-vol:/data'
-    healthcheck:
-      test:
-        - CMD
-        - redis-cli
-        - ping
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      - 'redis-queue-data:/data'
+    networks:
+      - coolify
   redis-socketio:
     image: 'redis:6.2-alpine'
     deploy:
-      replicas: 1
-    volumes:
-      - 'redis-socketio-vol:/data'
-    healthcheck:
-      test:
-        - CMD
-        - redis-cli
-        - ping
-      interval: 5s
-      timeout: 3s
-      retries: 10
-  create-site:
-    image: 'frappe/erpnext:v15.47.0'
-    deploy:
       restart_policy:
-        condition: none
-    command:
-      - bash
-      - '-c'
-      - |
-        wait-for-it -t 300 db:3306; wait-for-it -t 120 redis-cache:6379; wait-for-it -t 120 redis-queue:6379; wait-for-it -t 120 redis-socketio:6379; export start=`date +%s`; until [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".db_host // empty"` ]] && 
-          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_cache // empty"` ]] && 
-          [[ -n `grep -hs ^ sites/common_site_config.json | jq -r ".redis_queue // empty"` ]];
-        do
-          echo "Waiting for sites/common_site_config.json to be created";
-          sleep 10;
-          if (( `date +%s`-start > 600 )); then
-            echo "Timeout waiting for configuration";
-            exit 1
-          fi
-        done; echo "Configuration found, creating site with custom domain..."; bench new-site crm.crogallcapital.com --no-mariadb-socket --admin-password=admin --db-root-password=admin --install-app erpnext --set-default --verbose; echo "Site creation completed for crm.crogallcapital.com";
-    environment:
-      SITE_NAME: crm.crogallcapital.com
+        condition: on-failure
     volumes:
-      - 'sites-vol:/home/frappe/frappe-bench/sites'
-      - 'logs-vol:/home/frappe/frappe-bench/logs'
-    depends_on:
-      db:
-        condition: service_healthy
-      redis-cache:
-        condition: service_healthy
-      redis-queue:
-        condition: service_healthy
-      redis-socketio:
-        condition: service_healthy
-      configurator:
-        condition: service_completed_successfully
+      - 'redis-socketio-data:/data'
+    networks:
+      - coolify
+networks:
+  coolify:
+    external: true
 volumes:
-  db-vol: null
-  redis-cache-vol: null
-  redis-queue-vol: null
-  redis-socketio-vol: null
-  sites-vol: null
-  logs-vol: null
+  db-data: null
+  redis-cache-data: null
+  redis-queue-data: null
+  redis-socketio-data: null
+  sites: null
