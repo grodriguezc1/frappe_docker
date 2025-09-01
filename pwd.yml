@@ -233,3 +233,193 @@ volumes:
   redis-queue-data: null
   redis-socketio-data: null
   sites: null
+
+
+
+
+
+  ------------------
+
+
+
+
+  #Lo que está ahora es sin config y sin frontend, para después del deploy.
+  version: '3.8'
+services:
+  backend:
+    image: 'frappe/erpnext:v15.34.0'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    environment:
+      - DB_HOST=db
+      - DB_PORT=3306
+      - 'REDIS_CACHE=redis-cache:6379'
+      - 'REDIS_QUEUE=redis-queue:6379'
+      - 'REDIS_SOCKETIO=redis-socketio:6379'
+    volumes:
+      - 'sites:/home/frappe/frappe-bench/sites'
+    networks:
+      - coolify
+  frontend:
+    image: 'frappe/erpnext:v15.34.0'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command:
+      - nginx-entrypoint.sh
+    environment:
+      - 'BACKEND=backend:8000'
+      - 'SOCKETIO=socketio:9000'
+      - FRAPPE_SITE_NAME_HEADER=crm.crogallcapital.com
+      - UPSTREAM_REAL_IP_ADDRESS=127.0.0.1
+      - UPSTREAM_REAL_IP_HEADER=X-Forwarded-For
+      - UPSTREAM_REAL_IP_RECURSIVE=off
+      - PROXY_READ_TIMEOUT=120
+      - CLIENT_MAX_BODY_SIZE=50m
+      - SKIP_NGINX_TEMPLATE_GENERATION=0
+      - HTTP_TIMEOUT=120
+      - FRAPPE_SITE_NAME_HEADER_ENABLED=1
+    volumes:
+      - 'sites:/home/frappe/frappe-bench/sites'
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.erpnext-https.rule=Host(`crm.crogallcapital.com`)
+      - traefik.http.routers.erpnext-https.entrypoints=https
+      - traefik.http.routers.erpnext-https.tls=true
+      - traefik.http.routers.erpnext-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.erpnext-https.service=erpnext-service
+      - traefik.http.routers.erpnext-http.rule=Host(`crm.crogallcapital.com`)
+      - traefik.http.routers.erpnext-http.entrypoints=http
+      - traefik.http.routers.erpnext-http.middlewares=redirect-to-https
+      - traefik.http.services.erpnext-service.loadbalancer.server.port=8080
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+    depends_on:
+      - backend
+      - socketio
+    networks:
+      - coolify
+  queue-default:
+    image: 'frappe/erpnext:v15.34.0'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command:
+      - bench
+      - worker
+      - '--queue'
+      - default
+    volumes:
+      - 'sites:/home/frappe/frappe-bench/sites'
+    networks:
+      - coolify
+  queue-long:
+    image: 'frappe/erpnext:v15.34.0'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command:
+      - bench
+      - worker
+      - '--queue'
+      - long
+    volumes:
+      - 'sites:/home/frappe/frappe-bench/sites'
+    networks:
+      - coolify
+  queue-short:
+    image: 'frappe/erpnext:v15.34.0'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command:
+      - bench
+      - worker
+      - '--queue'
+      - short
+    volumes:
+      - 'sites:/home/frappe/frappe-bench/sites'
+    networks:
+      - coolify
+  scheduler:
+    image: 'frappe/erpnext:v15.34.0'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command:
+      - bench
+      - schedule
+    volumes:
+      - 'sites:/home/frappe/frappe-bench/sites'
+    networks:
+      - coolify
+  socketio:
+    image: 'frappe/erpnext:v15.34.0'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command:
+      - node
+      - /home/frappe/frappe-bench/apps/frappe/socketio.js
+    volumes:
+      - 'sites:/home/frappe/frappe-bench/sites'
+    depends_on:
+      - redis-socketio
+    networks:
+      - coolify
+  db:
+    image: 'mariadb:10.6'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    command:
+      - '--character-set-server=utf8mb4'
+      - '--collation-server=utf8mb4_unicode_ci'
+      - '--skip-character-set-client-handshake'
+      - '--skip-innodb-read-only-compressed'
+      - '--innodb-buffer-pool-size=256M'
+    environment:
+      - MYSQL_ROOT_PASSWORD=admin123
+      - MYSQL_CHARACTER_SET_SERVER=utf8mb4
+      - MYSQL_COLLATION_SERVER=utf8mb4_unicode_ci
+    volumes:
+      - 'db-data:/var/lib/mysql'
+    networks:
+      - coolify
+  redis-cache:
+    image: 'redis:6.2-alpine'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    volumes:
+      - 'redis-cache-data:/data'
+    networks:
+      - coolify
+  redis-queue:
+    image: 'redis:6.2-alpine'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    volumes:
+      - 'redis-queue-data:/data'
+    networks:
+      - coolify
+  redis-socketio:
+    image: 'redis:6.2-alpine'
+    deploy:
+      restart_policy:
+        condition: on-failure
+    volumes:
+      - 'redis-socketio-data:/data'
+    networks:
+      - coolify
+networks:
+  coolify:
+    external: true
+volumes:
+  db-data: null
+  redis-cache-data: null
+  redis-queue-data: null
+  redis-socketio-data: null
+  sites: null
+
